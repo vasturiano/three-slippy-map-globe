@@ -52,9 +52,9 @@ export default class ThreeSlippyMapGlobe extends Group {
         let reproY = y,
           tileLatLen = regTileLatLen;
         if (this.#isMercator) {
-          // lat needs reprojection
-          reproY = yMercatorScaleInvert(y / gridSize) * gridSize;
-          const reproYEnd = yMercatorScaleInvert((y + 1) / gridSize) * gridSize;
+          // lat needs reprojection, but stretch to cover poles
+          reproY = y === 0 ? y : yMercatorScaleInvert(y / gridSize) * gridSize;
+          const reproYEnd = y + 1 === gridSize ? y + 1 : yMercatorScaleInvert((y + 1) / gridSize) * gridSize;
           tileLatLen = (reproYEnd - reproY) * 180 / gridSize;
         }
 
