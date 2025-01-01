@@ -29,21 +29,76 @@ export default class ThreeSlippyMapGlobe extends Group {
 
   // Public attributes
   tileUrl;
-  thresholds = [4, 2, 1, 1/2, 1/4, 1/8, 1/16, 1/32, 1/64, 1/128]; // in terms of radius units
+  thresholds = [8, 4, 2, 1, 1/2, 1/4, 1/8, 1/16, 1/32, 1/64, 1/128]; // in terms of radius units
   curvatureResolution = 5; // in degrees, affects number of vertices in tiles
   tileMargin = 0;
   get level() { return this.#level }
   set level(level) {
-    if (level === this.#level && this.#tilesMeta.length) return; // nothing to do
+    if (!this.#tilesMeta[level]) this.#buildMetaLevel(level);
 
+    const prevLevel = this.#level;
     this.#level = level;
 
-    // Wipe existing tiles
-    emptyObject(this);
+    if (level === prevLevel || prevLevel === undefined) return; // nothing else to do
 
-    // Rebuild tiles meta
-    this.#tilesMeta.forEach(d => d.discard = true);
-    this.#tilesMeta = [];
+    // Bring layer to front
+    this.#tilesMeta[level].forEach(d => d.obj && (d.obj.material.depthTest = true));
+
+    this.#tilesMeta[prevLevel].forEach(prevLevel < level ?
+      // push lower layers to background
+      d => d.obj && (d.obj.material.depthTest = false) :
+      // Remove upper layers
+      d => {
+        d.loading && (d.discard = true);
+        d.fetched = false;
+        if (d.obj) {
+          this.remove(d.obj);
+          emptyObject(d.obj);
+          delete d.obj;
+        }
+      });
+
+    this.#fetchNeededTiles();
+  }
+
+  // Public methods
+  updatePov(camera) {
+    if (!camera || !(camera instanceof Camera)) return;
+
+    const pov = camera.position.clone();
+    const distToGlobeCenter = pov.distanceTo(this.getWorldPosition(new Vector3()));
+    const cameraDistance = (distToGlobeCenter - this.#radius) / this.#radius; // in units of globe radius
+
+    camera.updateMatrix();
+    camera.updateMatrixWorld();
+    const frustum = new Frustum();
+    frustum.setFromProjectionMatrix(new Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+
+    this.#isInView = pos => {
+      const wPos = pos.clone().applyMatrix4(this.matrixWorld);
+
+      // simplistic way to check if it's behind globe: if it's farther than the center of the globe
+      return pov.distanceTo(wPos) < distToGlobeCenter && frustum.containsPoint(wPos);
+    }
+
+    if (this.tileUrl) {
+      const idx = this.thresholds.findIndex(t => t && t <= cameraDistance);
+      this.level = idx < 0 ? this.thresholds.length : idx;
+      this.#fetchNeededTiles();
+    }
+  }
+
+  // Private attributes
+  #radius;
+  #isMercator;
+  #level;
+  #tilesMeta = {};
+  #isInView;
+
+  // Private methods
+  #buildMetaLevel(level) {
+    this.#tilesMeta[level] = [];
+
     const gridSize = 2 ** level;
     const tileLngLen = 360 / gridSize;
     const regTileLatLen = 180 / gridSize;
@@ -70,7 +125,7 @@ export default class ThreeSlippyMapGlobe extends Group {
           [lat0 - tileLatLen / 2, lng0 + tileLngLen / 2],
         ].map(c => polar2Cartesian(...c, this.#radius)).map(({ x, y, z }) => new Vector3(x, y, z));
 
-        this.#tilesMeta.push({
+        this.#tilesMeta[level].push({
           x,
           y,
           lat0,
@@ -82,62 +137,15 @@ export default class ThreeSlippyMapGlobe extends Group {
         });
       }
     }
-
-    this.#fetchNeededTiles();
   }
 
-  // Public methods
-  updatePov(camera) {
-    if (!camera || !(camera instanceof Camera)) return;
+  #fetchNeededTiles(){
+    if (!this.tileUrl || this.level === undefined) return;
 
-    const pov = camera.position;
-    const distToGlobeCenter = pov.distanceTo(this.getWorldPosition(new Vector3()));
-    const cameraDistance = (distToGlobeCenter - this.#radius) / this.#radius; // in units of globe radius
+    // Safety if can't check in view tiles for higher levels (level 6 = 4096 tiles)
+    if (!this.#isInView && this.level > 6) return;
 
-    let frustum;
-    this.#isInView = pos => {
-      const wPos = pos.clone().applyMatrix4(this.matrixWorld);
-
-      if (!frustum) {
-        camera.updateMatrix();
-        camera.updateMatrixWorld();
-        frustum = new Frustum();
-        frustum.setFromProjectionMatrix(new Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
-      }
-
-      if (!frustum.containsPoint(wPos)) return false; // point out of view
-
-      // simplistic way to check if it's behind globe: if it's farther than the center of the globe
-      return pov.distanceTo(wPos) < distToGlobeCenter;
-    }
-
-    //
-
-    if (!this.tileUrl || cameraDistance <= 0) {
-      this.level = 0;
-    } else {
-      const idx = this.thresholds.findIndex(t => t && t <= cameraDistance);
-      this.level = idx < 0 ? this.thresholds.length : idx;
-    }
-
-    this.#fetchNeededTiles();
-  }
-
-  // Private attributes
-  #radius;
-  #isMercator;
-  #level;
-  #tilesMeta = [];
-  #isInView;
-
-  // Private methods
-  #fetchNeededTiles() {
-    if (!this.tileUrl) return;
-
-    // Safety if can't check in view tiles for higher levels
-    if (!this.#isInView && this.level > 4) return;
-
-    this.#tilesMeta
+    this.#tilesMeta[this.level]
       .filter(d => !d.fetched && !d.discard)
       .forEach((d) => {
         if (!this.#isInView || d.hullPnts.some(this.#isInView)) {
@@ -166,7 +174,6 @@ export default class ThreeSlippyMapGlobe extends Group {
           this.#isMercator && convertMercatorUV(tile.geometry.attributes.uv, 0.5 - (lat0 / 180), 0.5 - (lat1 / 180));
 
           new TextureLoader().load(this.tileUrl(x, y, this.level), texture => {
-            d.loading = false;
             if (!d.discard) {
               texture.colorSpace = SRGBColorSpace;
               tile.material.map = texture;
@@ -175,10 +182,12 @@ export default class ThreeSlippyMapGlobe extends Group {
 
               this.add(tile);
             }
+            d.loading = false;
+            d.discard = false;
           });
 
           d.obj = tile;
         }
       });
-    }
+  }
 }
