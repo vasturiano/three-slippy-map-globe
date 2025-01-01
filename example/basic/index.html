@@ -16,7 +16,7 @@
   <script type="module">
     import SlippyMapGlobe from 'https://esm.sh/three-slippy-map-globe?external=three';
     import * as THREE from 'https://esm.sh/three';
-    import { TrackballControls } from 'three/addons/controls/TrackballControls.js?external=three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js?external=three';
 
     const R = 100;
 
@@ -39,22 +39,30 @@
     const camera = new THREE.PerspectiveCamera();
     camera.aspect = window.innerWidth/window.innerHeight;
     camera.updateProjectionMatrix();
-    camera.position.z = R * 5;
+    camera.position.z = R * 6;
 
     // Add camera controls
-    const tbControls = new TrackballControls(camera, renderer.domElement);
-    tbControls.minDistance = R;
-    tbControls.rotateSpeed = 3;
-    tbControls.zoomSpeed = 0.5;
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.minDistance = R * 1.001; // Just above surface
+    controls.maxDistance = R * 50;
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.1;
+    controls.rotateSpeed = 0.3;
+    controls.zoomSpeed = 0.3;
 
     // Update pov when camera moves
     Globe.updatePov(camera);
-    tbControls.addEventListener('change', () => Globe.updatePov(camera));
+    controls.addEventListener('change', () => {
+      Globe.updatePov(camera);
+      const distToSurface = camera.position.distanceTo(Globe.position) - R;
+      controls.rotateSpeed = distToSurface * 0.004;
+      controls.zoomSpeed = Math.sqrt(distToSurface) * 0.06;
+    });
 
     // Kick-off renderer
     (function animate() { // IIFE
       // Frame cycle
-      tbControls.update();
+      controls.update();
       renderer.render(scene, camera);
       requestAnimationFrame(animate);
     })();
