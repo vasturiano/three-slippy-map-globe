@@ -1,0 +1,62 @@
+<head>
+  <style> body { margin: 0; } </style>
+
+  <script type="importmap">{ "imports": {
+    "three": "https://esm.sh/three",
+    "three/addons/": "https://esm.sh/three/examples/jsm/"
+  }}</script>
+
+<!--  <script type="module"> import * as THREE from 'three'; window.THREE = THREE;</script>-->
+<!--  <script src="../../dist/three-slippy-map-globe.js" defer></script>-->
+</head>
+
+<body>
+  <div id="globe"></div>
+
+  <script type="module">
+    import SlippyMapGlobe from 'https://esm.sh/three-slippy-map-globe?external=three';
+    import * as THREE from 'https://esm.sh/three';
+    import { TrackballControls } from 'three/addons/controls/TrackballControls.js?external=three';
+
+    const R = 100;
+
+    const Globe = new SlippyMapGlobe(R);
+    Globe.tileUrl = (x, y, l) => `https://tile.opentopomap.org/${l}/${x}/${y}.png`;
+    Globe.tileMargin = 0.003;
+
+    // Setup renderer
+    const renderer = new THREE.WebGLRenderer();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.getElementById('globe').appendChild(renderer.domElement);
+
+    // Setup scene
+    const scene = new THREE.Scene();
+    scene.add(Globe);
+    scene.add(new THREE.AmbientLight(0xcccccc, Math.PI));
+    scene.add(new THREE.DirectionalLight(0xffffff, 0.6 * Math.PI));
+
+    // Setup camera
+    const camera = new THREE.PerspectiveCamera();
+    camera.aspect = window.innerWidth/window.innerHeight;
+    camera.updateProjectionMatrix();
+    camera.position.z = R * 5;
+
+    // Add camera controls
+    const tbControls = new TrackballControls(camera, renderer.domElement);
+    tbControls.minDistance = R;
+    tbControls.rotateSpeed = 3;
+    tbControls.zoomSpeed = 0.5;
+
+    // Update pov when camera moves
+    Globe.updatePov(camera);
+    tbControls.addEventListener('change', () => Globe.updatePov(camera));
+
+    // Kick-off renderer
+    (function animate() { // IIFE
+      // Frame cycle
+      tbControls.update();
+      renderer.render(scene, camera);
+      requestAnimationFrame(animate);
+    })();
+  </script>
+</body>
