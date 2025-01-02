@@ -11,9 +11,12 @@ import {
   Vector3
 } from 'three';
 
+import { octree as d3Octree } from 'd3-octree';
+
 import { emptyObject } from "./utils/gc.js";
 import { polar2Cartesian, deg2Rad } from "./utils/coordTranslate.js";
-import { yMercatorScaleInvert, convertMercatorUV } from './utils/mercator.js';
+import { convertMercatorUV } from './utils/mercator.js';
+import genLevel from "./utils/levelGenerator.js";
 
 export default class ThreeSlippyMapGlobe extends Group {
   constructor(radius, {
@@ -29,7 +32,7 @@ export default class ThreeSlippyMapGlobe extends Group {
 
   // Public attributes
   tileUrl;
-  thresholds = [8, 4, 2, 1, 1/2, 1/4, 1/8, 1/16, 1/32, 1/64, 1/128]; // in terms of radius units
+  thresholds = [8, 4, 2, 1, 1/2, 1/4, 1/8, 1/16, 1/32, 1/64]; // in terms of radius units
   curvatureResolution = 5; // in degrees, affects number of vertices in tiles
   tileMargin = 0;
   get level() { return this.#level }
@@ -65,6 +68,8 @@ export default class ThreeSlippyMapGlobe extends Group {
   updatePov(camera) {
     if (!camera || !(camera instanceof Camera)) return;
 
+    this.#camera = camera;
+
     const pov = camera.position.clone();
     const distToGlobeCenter = pov.distanceTo(this.getWorldPosition(new Vector3()));
     const cameraDistance = (distToGlobeCenter - this.#radius) / this.#radius; // in units of globe radius
@@ -74,11 +79,21 @@ export default class ThreeSlippyMapGlobe extends Group {
     const frustum = new Frustum();
     frustum.setFromProjectionMatrix(new Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
 
-    this.#isInView = pos => {
-      const wPos = pos.clone().applyMatrix4(this.matrixWorld);
-
-      // simplistic way to check if it's behind globe: if it's farther than the center of the globe
-      return pov.distanceTo(wPos) < distToGlobeCenter && frustum.containsPoint(wPos);
+    this.#isInView = d => {
+      if (!d.hullPnts) { // cached for next time to improve performance
+        const lngLen = 360 / (2**this.level);
+        const { lng, lat, latLen } = d;
+        const lng0 = lng - lngLen / 2;
+        const lng1 = lng + lngLen / 2;
+        const lat0 = lat - latLen / 2;
+        const lat1 = lat + latLen / 2;
+        d.hullPnts = [[lat, lng], [lat0, lng0], [lat1, lng0], [lat0, lng1], [lat1, lng1]]
+          .map(([lat, lng]) => polar2Cartesian(lat, lng, this.#radius))
+          .map(({ x, y, z }) => new Vector3(x, y, z));
+      }
+      return d.hullPnts.some(pos =>
+        frustum.containsPoint(pos.clone().applyMatrix4(this.matrixWorld))
+      );
     }
 
     if (this.tileUrl) {
@@ -94,100 +109,80 @@ export default class ThreeSlippyMapGlobe extends Group {
   #level;
   #tilesMeta = {};
   #isInView;
+  #camera;
 
   // Private methods
   #buildMetaLevel(level) {
-    this.#tilesMeta[level] = [];
+    const levelMeta = this.#tilesMeta[level] = genLevel(level, this.#isMercator);
 
-    const gridSize = 2 ** level;
-    const tileLngLen = 360 / gridSize;
-    const regTileLatLen = 180 / gridSize;
-    for (let x = 0; x < gridSize; x++) {
-      for (let y = 0; y < gridSize; y++) {
-        let reproY = y,
-          tileLatLen = regTileLatLen;
-        if (this.#isMercator) {
-          // lat needs reprojection, but stretch to cover poles
-          reproY = y === 0 ? y : yMercatorScaleInvert(y / gridSize) * gridSize;
-          const reproYEnd = y + 1 === gridSize ? y + 1 : yMercatorScaleInvert((y + 1) / gridSize) * gridSize;
-          tileLatLen = (reproYEnd - reproY) * 180 / gridSize;
-        }
+    levelMeta.forEach(d => d.centroid = polar2Cartesian(d.lat, d.lng, this.#radius));
 
-        const lng0 = -180 + x * tileLngLen;
-        const lng1 = lng0 + tileLngLen;
-        const lat0 = 90 - (reproY * 180 / gridSize);
-        const lat1 = lat0 - tileLatLen;
-        const hullPnts = [
-          [lat0, lng0],
-          [lat1, lng0],
-          [lat0, lng1],
-          [lat1, lng1],
-          [lat0 - tileLatLen / 2, lng0 + tileLngLen / 2],
-        ].map(c => polar2Cartesian(...c, this.#radius)).map(({ x, y, z }) => new Vector3(x, y, z));
-
-        this.#tilesMeta[level].push({
-          x,
-          y,
-          lat0,
-          lat1,
-          lng0,
-          lng1,
-          hullPnts,
-          fetched: false
-        });
-      }
-    }
+    levelMeta.octree = d3Octree()
+      .x(d => d.centroid.x)
+      .y(d => d.centroid.y)
+      .z(d => d.centroid.z)
+      .addAll(levelMeta);
   }
 
   #fetchNeededTiles(){
-    if (!this.tileUrl || this.level === undefined) return;
+    if (!this.tileUrl || this.level === undefined || !this.#tilesMeta.hasOwnProperty(this.level)) return;
 
     // Safety if can't check in view tiles for higher levels (level 6 = 4096 tiles)
     if (!this.#isInView && this.level > 6) return;
 
-    this.#tilesMeta[this.level]
+    let tiles = this.#tilesMeta[this.level];
+    if (this.#camera) {
+      // Pre-select points close to the camera using an octree for improved performance
+      const DISTANCE_CHECK_FACTOR = 3;
+      const povPos = this.worldToLocal(this.#camera.position.clone());
+      const searchRadius = (povPos.length() - this.#radius) * DISTANCE_CHECK_FACTOR;
+      tiles = tiles.octree.findAllWithinRadius(...povPos, searchRadius);
+    }
+
+    tiles
       .filter(d => !d.fetched && !d.discard)
-      .forEach((d) => {
-        if (!this.#isInView || d.hullPnts.some(this.#isInView)) {
-          // Fetch tile
-          d.fetched = true;
-          d.loading = true;
+      .filter(this.#isInView || (() => true))
+      .forEach(d => {
+        // Fetch tile
+        d.fetched = true;
+        d.loading = true;
 
-          const { x, y, lat0, lat1, lng0, lng1 } = d;
+        const lngLen = 360 / (2**this.level);
+        const { x, y, lng, lat, latLen } = d;
 
-          const width = (lng1 - lng0) * (1 - this.tileMargin);
-          const height = (lat0 - lat1) * (1 - this.tileMargin);
-          const rotLng = deg2Rad((lng0 + lng1) / 2);
-          const rotLat = deg2Rad(-(lat0 + lat1) / 2);
-          const tile = new Mesh(
-            new SphereGeometry(
-              this.#radius,
-              Math.ceil(width / this.curvatureResolution),
-              Math.ceil(height / this.curvatureResolution),
-              deg2Rad(90 - width / 2) + rotLng,
-              deg2Rad(width),
-              deg2Rad(90 - height / 2) + rotLat,
-              deg2Rad(height)
-            ),
-            new MeshLambertMaterial()
-          );
-          this.#isMercator && convertMercatorUV(tile.geometry.attributes.uv, 0.5 - (lat0 / 180), 0.5 - (lat1 / 180));
+        const width = lngLen * (1 - this.tileMargin);
+        const height = latLen * (1 - this.tileMargin);
+        const rotLng = deg2Rad(lng);
+        const rotLat = deg2Rad(-lat);
+        const tile = new Mesh(
+          new SphereGeometry(
+            this.#radius,
+            Math.ceil(width / this.curvatureResolution),
+            Math.ceil(height / this.curvatureResolution),
+            deg2Rad(90 - width / 2) + rotLng,
+            deg2Rad(width),
+            deg2Rad(90 - height / 2) + rotLat,
+            deg2Rad(height)
+          ),
+          new MeshLambertMaterial()
+        );
+        const [y0, y1] = [lat + latLen / 2, lat - latLen / 2].map(lat => 0.5 - (lat / 180));
+        this.#isMercator && convertMercatorUV(tile.geometry.attributes.uv, y0, y1);
 
-          new TextureLoader().load(this.tileUrl(x, y, this.level), texture => {
-            if (!d.discard) {
-              texture.colorSpace = SRGBColorSpace;
-              tile.material.map = texture;
-              tile.material.color = null;
-              tile.material.needsUpdate = true;
+        new TextureLoader().load(this.tileUrl(x, y, this.level), texture => {
+          if (!d.discard) {
+            texture.colorSpace = SRGBColorSpace;
+            tile.material.map = texture;
+            tile.material.color = null;
+            tile.material.needsUpdate = true;
 
-              this.add(tile);
-            }
-            d.loading = false;
-            d.discard = false;
-          });
+            this.add(tile);
+          }
+          d.loading = false;
+          d.discard = false;
+        });
 
-          d.obj = tile;
-        }
+        d.obj = tile;
       });
   }
 }
