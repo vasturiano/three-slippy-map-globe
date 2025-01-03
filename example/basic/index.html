@@ -22,6 +22,7 @@
 
     const Globe = new SlippyMapGlobe(R);
     Globe.tileUrl = (x, y, l) => `https://tile.opentopomap.org/${l}/${x}/${y}.png`;
+    Globe.thresholds = [...new Array(17)].map((_, idx) => 8 / 2**idx);
 
     // Setup renderer
     const renderer = new THREE.WebGLRenderer();
@@ -37,13 +38,15 @@
     // Setup camera
     const camera = new THREE.PerspectiveCamera();
     camera.aspect = window.innerWidth/window.innerHeight;
+    camera.near = 1e-9;
+    camera.far = R * 100;
     camera.updateProjectionMatrix();
     camera.position.z = R * 6;
 
     // Add camera controls
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.minDistance = R * 1.001; // Just above surface
-    controls.maxDistance = R * 50;
+    controls.minDistance = R * 1.00001; // Just above surface, max resolution on level 17
+    controls.maxDistance = camera.far - R;
     controls.enableDamping = true;
     controls.dampingFactor = 0.1;
     controls.rotateSpeed = 0.3;
@@ -54,8 +57,8 @@
     controls.addEventListener('change', () => {
       Globe.updatePov(camera);
       const distToSurface = camera.position.distanceTo(Globe.position) - R;
-      controls.rotateSpeed = distToSurface * 0.004;
-      controls.zoomSpeed = Math.sqrt(distToSurface) * 0.06;
+      controls.rotateSpeed = distToSurface / R * 0.4;
+      controls.zoomSpeed = Math.sqrt(distToSurface / R) * 0.6;
     });
 
     // Kick-off renderer
