@@ -11,10 +11,11 @@ import {
   Vector3
 } from 'three';
 
+import { quadtree as d3Quadtree } from 'd3-quadtree';
 import { octree as d3Octree } from 'd3-octree';
 
 import { emptyObject } from "./utils/gc.js";
-import { polar2Cartesian, deg2Rad } from "./utils/coordTranslate.js";
+import { deg2Rad, polar2Cartesian, cartesian2Polar } from './utils/coordTranslate.js';
 import { convertMercatorUV } from './utils/mercator.js';
 import genLevel from "./utils/levelGenerator.js";
 
@@ -32,7 +33,7 @@ export default class ThreeSlippyMapGlobe extends Group {
 
   // Public attributes
   tileUrl;
-  thresholds = [8, 4, 2, 1, 1/2, 1/4, 1/8, 1/16, 1/32, 1/64]; // in terms of radius units
+  thresholds = [8, 4, 2, 1, 1/2, 1/4, 1/8, 1/16, 1/32, 1/64, 1/128]; // in terms of radius units
   curvatureResolution = 5; // in degrees, affects number of vertices in tiles
   tileMargin = 0;
   get level() { return this.#level }
@@ -115,13 +116,19 @@ export default class ThreeSlippyMapGlobe extends Group {
   #buildMetaLevel(level) {
     const levelMeta = this.#tilesMeta[level] = genLevel(level, this.#isMercator);
 
-    levelMeta.forEach(d => d.centroid = polar2Cartesian(d.lat, d.lng, this.#radius));
-
-    levelMeta.octree = d3Octree()
-      .x(d => d.centroid.x)
-      .y(d => d.centroid.y)
-      .z(d => d.centroid.z)
-      .addAll(levelMeta);
+    if (level <= 8) { // octrees consume too much memory on higher levels, it's ok to use quadtrees for those as the distortion from the globe's surface is negligible
+      levelMeta.forEach(d => d.centroid = polar2Cartesian(d.lat, d.lng, this.#radius));
+      levelMeta.octree = d3Octree()
+        .x(d => d.centroid.x)
+        .y(d => d.centroid.y)
+        .z(d => d.centroid.z)
+        .addAll(levelMeta);
+    } else {
+      levelMeta.quadtree = d3Quadtree()
+        .x(d => d.lng)
+        .y(d => d.lat)
+        .addAll(levelMeta);
+    }
   }
 
   #fetchNeededTiles(){
@@ -133,10 +140,33 @@ export default class ThreeSlippyMapGlobe extends Group {
     let tiles = this.#tilesMeta[this.level];
     if (this.#camera) {
       // Pre-select points close to the camera using an octree for improved performance
-      const DISTANCE_CHECK_FACTOR = 3;
       const povPos = this.worldToLocal(this.#camera.position.clone());
-      const searchRadius = (povPos.length() - this.#radius) * DISTANCE_CHECK_FACTOR;
-      tiles = tiles.octree.findAllWithinRadius(...povPos, searchRadius);
+
+      if (tiles.octree) { // Octree based on 3d positions is more accurate
+        const DISTANCE_CHECK_FACTOR = 3; // xyz straight-line distance, relative to camera absolute altitude
+        const povPos = this.worldToLocal(this.#camera.position.clone());
+        const searchRadius = (povPos.length() - this.#radius) * DISTANCE_CHECK_FACTOR;
+        tiles = tiles.octree.findAllWithinRadius(...povPos, searchRadius);
+      } else if (tiles.quadtree) { // Fallback to quadtree, for upper levels
+        const DISTANCE_CHECK_FACTOR = 180; // in degrees on the globe surface, relative to camera altitude in globe radius units
+        const povCoords = cartesian2Polar(povPos);
+        const searchRadius = (povCoords.r / this.#radius - 1) * DISTANCE_CHECK_FACTOR;
+        const lngRange = [povCoords.lng - searchRadius, povCoords.lng + searchRadius];
+        const latRange = [povCoords.lat - searchRadius, povCoords.lat + searchRadius];
+        const result = [];
+        tiles.quadtree.visit((node, lng1, lat1, lng2, lat2) => {
+          if (!node.length) {
+            do {
+              const d = node.data;
+              if (Math.sqrt((povCoords.lng - d.lng)**2 + (povCoords.lat - d.lat)**2) <= searchRadius) {
+                result.push(d);
+              }
+            } while (node = node.next);
+          }
+          return lng1 > lngRange[1] || lat1 > latRange[1] || lng2 < lngRange[0] || lat2 < latRange[0];
+        });
+        tiles = result;
+      }
     }
 
     tiles
