@@ -83,7 +83,7 @@ export default class ThreeSlippyMapGlobe extends Group {
 
   // Public methods
   updatePov(camera) {
-    if (!camera || !(camera instanceof Camera)) return;
+    if (!this.tileUrl || !camera || !(camera instanceof Camera)) return;
 
     this.#camera = camera;
 

@@ -39,14 +39,14 @@
     // Setup camera
     const camera = new THREE.PerspectiveCamera();
     camera.aspect = window.innerWidth/window.innerHeight;
-    camera.near = 1e-9;
+    camera.near = 1e-12;
     camera.far = R * 100;
     camera.updateProjectionMatrix();
     camera.position.z = R * 6;
 
     // Add camera controls
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.minDistance = R * 1.00001; // Just above surface, max resolution on level 17
+    controls.minDistance = R * (1 + 5 / 2**Globe.maxLevel); // Just above surface, adjusted resolution to max level
     controls.maxDistance = camera.far - R;
     controls.enableDamping = true;
     controls.dampingFactor = 0.1;
