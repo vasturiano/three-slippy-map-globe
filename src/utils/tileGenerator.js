@@ -1,13 +1,26 @@
-import { yMercatorScaleInvert } from './mercator.js';
+import { yMercatorScale, yMercatorScaleInvert } from './mercator.js';
 
-export default function genLevel(level, isMercator) {
+export const findTileXY = (level, isMercator, lng, lat) => {
+  const gridSize = 2 ** level;
+  const x = Math.max(0, Math.min(gridSize - 1, Math.floor((lng + 180) * gridSize / 360)));
+  let relY = (90 - lat) / 180;
+  isMercator && (relY = Math.max(0, Math.min(1, yMercatorScale(relY))));
+  const y = Math.floor(relY * gridSize);
+  return [x, y];
+}
+
+const genTilesCoords = (level, isMercator, x0 = 0, y0 = 0, _x1, _y1) => {
   const tiles = [];
 
   const gridSize = 2 ** level;
   const tileLngLen = 360 / gridSize;
   const regTileLatLen = 180 / gridSize;
-  for (let x = 0; x < gridSize; x++) {
-    for (let y = 0; y < gridSize; y++) {
+
+  const x1 = _x1 === undefined ? gridSize - 1 : _x1;
+  const y1 = _y1 === undefined ? gridSize - 1 : _y1;
+
+  for (let x = x0, maxX = Math.min(gridSize - 1, x1); x <= maxX; x++) {
+    for (let y = y0, maxY = Math.min(gridSize - 1, y1); y <= maxY; y++) {
       let reproY = y, tileLatLen = regTileLatLen;
 
       if (isMercator) {
@@ -28,3 +41,5 @@ export default function genLevel(level, isMercator) {
 
   return tiles;
 }
+
+export default genTilesCoords;

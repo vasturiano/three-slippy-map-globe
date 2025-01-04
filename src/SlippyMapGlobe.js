@@ -11,13 +11,18 @@ import {
   Vector3
 } from 'three';
 
-import { quadtree as d3Quadtree } from 'd3-quadtree';
 import { octree as d3Octree } from 'd3-octree';
 
 import { emptyObject } from "./utils/gc.js";
 import { deg2Rad, polar2Cartesian, cartesian2Polar } from './utils/coordTranslate.js';
 import { convertMercatorUV } from './utils/mercator.js';
-import genLevel from "./utils/levelGenerator.js";
+import genTiles, { findTileXY } from './utils/tileGenerator.js';
+
+const DEFAULT_NUM_LEVELS = 17;
+const MAX_LEVEL_TO_RENDER_ALL_TILES = 6; // level 6 = 4096 tiles
+const MAX_LEVEL_TO_BUILD_LOOKUP_OCTREE = 7; // octrees consume too much memory on higher levels, generate tiles on demand for those (based on globe surface distance) as the distortion is negligible
+const TILE_SEARCH_RADIUS_CAMERA_DISTANCE = 3; // Euclidean distance factor, in units of camera distance to surface
+const TILE_SEARCH_RADIUS_SURFACE_DISTANCE = 90; // in degrees on the globe surface, relative to camera altitude in globe radius units
 
 export default class ThreeSlippyMapGlobe extends Group {
   constructor(radius, {
@@ -31,10 +36,18 @@ export default class ThreeSlippyMapGlobe extends Group {
     this.level = 0;
   }
 
+  // Private attributes
+  #radius;
+  #isMercator;
+  #level;
+  #tilesMeta = {};
+  #isInView;
+  #camera;
+
   // Public attributes
   tileUrl;
-  thresholds = [8, 4, 2, 1, 1/2, 1/4, 1/8, 1/16, 1/32, 1/64, 1/128]; // in terms of radius units
-  curvatureResolution = 5; // in degrees, affects number of vertices in tiles
+  thresholds = [...new Array(DEFAULT_NUM_LEVELS)].map((_, idx) => 8 / 2**idx); // in terms of radius units
+  curvatureResolution = 4; // in degrees, affects number of vertices in tiles
   tileMargin = 0;
   get level() { return this.#level }
   set level(level) {
@@ -53,8 +66,6 @@ export default class ThreeSlippyMapGlobe extends Group {
       d => d.obj && (d.obj.material.depthTest = false) :
       // Remove upper layers
       d => {
-        d.loading && (d.discard = true);
-        d.fetched = false;
         if (d.obj) {
           this.remove(d.obj);
           emptyObject(d.obj);
@@ -92,6 +103,7 @@ export default class ThreeSlippyMapGlobe extends Group {
           .map(([lat, lng]) => polar2Cartesian(lat, lng, this.#radius))
           .map(({ x, y, z }) => new Vector3(x, y, z));
       }
+
       return d.hullPnts.some(pos =>
         frustum.containsPoint(pos.clone().applyMatrix4(this.matrixWorld))
       );
@@ -104,115 +116,136 @@ export default class ThreeSlippyMapGlobe extends Group {
     }
   }
 
-  // Private attributes
-  #radius;
-  #isMercator;
-  #level;
-  #tilesMeta = {};
-  #isInView;
-  #camera;
-
   // Private methods
   #buildMetaLevel(level) {
-    const levelMeta = this.#tilesMeta[level] = genLevel(level, this.#isMercator);
-
-    if (level <= 8) { // octrees consume too much memory on higher levels, it's ok to use quadtrees for those as the distortion from the globe's surface is negligible
-      levelMeta.forEach(d => d.centroid = polar2Cartesian(d.lat, d.lng, this.#radius));
-      levelMeta.octree = d3Octree()
-        .x(d => d.centroid.x)
-        .y(d => d.centroid.y)
-        .z(d => d.centroid.z)
-        .addAll(levelMeta);
-    } else {
-      levelMeta.quadtree = d3Quadtree()
-        .x(d => d.lng)
-        .y(d => d.lat)
-        .addAll(levelMeta);
+    if (level > MAX_LEVEL_TO_BUILD_LOOKUP_OCTREE) {
+      // Generate meta dynamically
+      this.#tilesMeta[level] = [];
+      return;
     }
+
+    // Generate distance lookup octree
+    const levelMeta = this.#tilesMeta[level] = genTiles(level, this.#isMercator);
+    levelMeta.forEach(d => d.centroid = polar2Cartesian(d.lat, d.lng, this.#radius));
+    levelMeta.octree = d3Octree()
+      .x(d => d.centroid.x)
+      .y(d => d.centroid.y)
+      .z(d => d.centroid.z)
+      .addAll(levelMeta);
   }
 
   #fetchNeededTiles(){
     if (!this.tileUrl || this.level === undefined || !this.#tilesMeta.hasOwnProperty(this.level)) return;
 
-    // Safety if can't check in view tiles for higher levels (level 6 = 4096 tiles)
-    if (!this.#isInView && this.level > 6) return;
+    // Safety if can't check in view tiles for higher levels
+    if (!this.#isInView && this.level > MAX_LEVEL_TO_RENDER_ALL_TILES) return;
 
     let tiles = this.#tilesMeta[this.level];
-    if (this.#camera) {
-      // Pre-select points close to the camera using an octree for improved performance
+    if (this.#camera) { // Pre-select tiles close to the camera
       const povPos = this.worldToLocal(this.#camera.position.clone());
 
       if (tiles.octree) { // Octree based on 3d positions is more accurate
-        const DISTANCE_CHECK_FACTOR = 3; // xyz straight-line distance, relative to camera absolute altitude
         const povPos = this.worldToLocal(this.#camera.position.clone());
-        const searchRadius = (povPos.length() - this.#radius) * DISTANCE_CHECK_FACTOR;
+        const searchRadius = (povPos.length() - this.#radius) * TILE_SEARCH_RADIUS_CAMERA_DISTANCE;
         tiles = tiles.octree.findAllWithinRadius(...povPos, searchRadius);
-      } else if (tiles.quadtree) { // Fallback to quadtree, for upper levels
-        const DISTANCE_CHECK_FACTOR = 180; // in degrees on the globe surface, relative to camera altitude in globe radius units
+      } else { // tiles populated dynamically
         const povCoords = cartesian2Polar(povPos);
-        const searchRadius = (povCoords.r / this.#radius - 1) * DISTANCE_CHECK_FACTOR;
-        const lngRange = [povCoords.lng - searchRadius, povCoords.lng + searchRadius];
-        const latRange = [povCoords.lat - searchRadius, povCoords.lat + searchRadius];
-        const result = [];
-        tiles.quadtree.visit((node, lng1, lat1, lng2, lat2) => {
-          if (!node.length) {
-            do {
-              const d = node.data;
-              if (Math.sqrt((povCoords.lng - d.lng)**2 + (povCoords.lat - d.lat)**2) <= searchRadius) {
-                result.push(d);
+        const searchRadiusLat = (povCoords.r / this.#radius - 1) * TILE_SEARCH_RADIUS_SURFACE_DISTANCE;
+        const searchRadiusLng = searchRadiusLat / Math.cos(deg2Rad(povCoords.lat)); // Distances in longitude degrees shrink towards the poles
+        const lngRange = [povCoords.lng - searchRadiusLng, povCoords.lng + searchRadiusLng];
+        const latRange = [povCoords.lat + searchRadiusLat, povCoords.lat - searchRadiusLat];
+
+        const [x0, y0] = findTileXY(this.level, this.#isMercator, lngRange[0], latRange[0]);
+        const [x1, y1] = findTileXY(this.level, this.#isMercator, lngRange[1], latRange[1]);
+
+        !tiles.record && (tiles.record = {}); // Index gen tiles by XY
+        const r = tiles.record;
+
+        if (!r.hasOwnProperty(`${Math.round((x0+x1)/2)}_${Math.round((y0+y1)/2)}`)) { // gen all found tiles if middle one is not in record
+          tiles = genTiles(this.level, this.#isMercator, x0, y0, x1, y1)
+            .map(d => {
+              const k = `${d.x}_${d.y}`;
+              if (r.hasOwnProperty(k)) return r[k];
+
+              r[k] = d;
+              tiles.push(d);
+              return d;
+            });
+        } else { // gen only those missing, one by one
+          tiles = [];
+          for (let x = x0; x <= x1; x++) {
+            for (let y = y0; y <= y1; y++) {
+              const k = `${x}_${y}`;
+              if (!r.hasOwnProperty(k)) {
+                r[k] = genTiles(this.level, this.#isMercator, x, y, x, y)[0];
               }
-            } while (node = node.next);
+              tiles.push(r[k]);
+            }
           }
-          return lng1 > lngRange[1] || lat1 > latRange[1] || lng2 < lngRange[0] || lat2 < latRange[0];
-        });
-        tiles = result;
+        }
       }
     }
 
+    /*
+    console.log({
+      level: this.level,
+      totalObjs: this.children.length,
+      tilesFound: tiles.length,
+      tilesInView: tiles.filter(this.#isInView || (() => true)).length,
+      levelTiles: this.#tilesMeta[this.level].length,
+      fetched: this.#tilesMeta[this.level].filter(d => d.obj).length,
+      loading: this.#tilesMeta[this.level].filter(d => d.loading).length,
+    });
+    */
+
     tiles
-      .filter(d => !d.fetched && !d.discard)
+      .filter(d => !d.obj)
       .filter(this.#isInView || (() => true))
       .forEach(d => {
-        // Fetch tile
-        d.fetched = true;
-        d.loading = true;
-
-        const lngLen = 360 / (2**this.level);
         const { x, y, lng, lat, latLen } = d;
+        const lngLen = 360 / (2**this.level);
 
-        const width = lngLen * (1 - this.tileMargin);
-        const height = latLen * (1 - this.tileMargin);
-        const rotLng = deg2Rad(lng);
-        const rotLat = deg2Rad(-lat);
-        const tile = new Mesh(
-          new SphereGeometry(
-            this.#radius,
-            Math.ceil(width / this.curvatureResolution),
-            Math.ceil(height / this.curvatureResolution),
-            deg2Rad(90 - width / 2) + rotLng,
-            deg2Rad(width),
-            deg2Rad(90 - height / 2) + rotLat,
-            deg2Rad(height)
-          ),
-          new MeshLambertMaterial()
-        );
-        const [y0, y1] = [lat + latLen / 2, lat - latLen / 2].map(lat => 0.5 - (lat / 180));
-        this.#isMercator && convertMercatorUV(tile.geometry.attributes.uv, y0, y1);
-
-        new TextureLoader().load(this.tileUrl(x, y, this.level), texture => {
-          if (!d.discard) {
-            texture.colorSpace = SRGBColorSpace;
-            tile.material.map = texture;
-            tile.material.color = null;
-            tile.material.needsUpdate = true;
-
-            this.add(tile);
+        if (!d.obj) {
+          const width = lngLen * (1 - this.tileMargin);
+          const height = latLen * (1 - this.tileMargin);
+          const rotLng = deg2Rad(lng);
+          const rotLat = deg2Rad(-lat);
+          const tile = new Mesh(
+            new SphereGeometry(
+              this.#radius,
+              Math.ceil(width / this.curvatureResolution),
+              Math.ceil(height / this.curvatureResolution),
+              deg2Rad(90 - width / 2) + rotLng,
+              deg2Rad(width),
+              deg2Rad(90 - height / 2) + rotLat,
+              deg2Rad(height)
+            ),
+            new MeshLambertMaterial()
+          );
+          if (this.#isMercator) {
+            const [y0, y1] = [lat + latLen / 2, lat - latLen / 2].map(lat => 0.5 - (lat / 180));
+            convertMercatorUV(tile.geometry.attributes.uv, y0, y1);
           }
-          d.loading = false;
-          d.discard = false;
-        });
 
-        d.obj = tile;
+          d.obj = tile;
+        }
+
+        if (!d.loading) {
+          d.loading = true;
+
+          // Fetch tile image
+          new TextureLoader().load(this.tileUrl(x, y, this.level), texture => {
+            const tile = d.obj;
+            if (tile) {
+              texture.colorSpace = SRGBColorSpace;
+              tile.material.map = texture;
+              tile.material.color = null;
+              tile.material.needsUpdate = true;
+              this.add(tile);
+            }
+            d.loading = false;
+          });
+        }
       });
   }
 }
