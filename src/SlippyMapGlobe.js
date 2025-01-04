@@ -18,7 +18,6 @@ import { deg2Rad, polar2Cartesian, cartesian2Polar } from './utils/coordTranslat
 import { convertMercatorUV } from './utils/mercator.js';
 import genTiles, { findTileXY } from './utils/tileGenerator.js';
 
-const DEFAULT_NUM_LEVELS = 17;
 const MAX_LEVEL_TO_RENDER_ALL_TILES = 6; // level 6 = 4096 tiles
 const MAX_LEVEL_TO_BUILD_LOOKUP_OCTREE = 7; // octrees consume too much memory on higher levels, generate tiles on demand for those (based on globe surface distance) as the distortion is negligible
 const TILE_SEARCH_RADIUS_CAMERA_DISTANCE = 3; // Euclidean distance factor, in units of camera distance to surface
@@ -27,12 +26,16 @@ const TILE_SEARCH_RADIUS_SURFACE_DISTANCE = 90; // in degrees on the globe surfa
 export default class ThreeSlippyMapGlobe extends Group {
   constructor(radius, {
     tileUrl,
+    minLevel = 0,
+    maxLevel = 20,
     mercatorProjection = true
   } = {}) {
     super();
     this.#radius = radius;
     this.tileUrl = tileUrl;
     this.#isMercator = mercatorProjection;
+    this.minLevel = minLevel;
+    this.maxLevel = maxLevel;
     this.level = 0;
   }
 
@@ -46,8 +49,10 @@ export default class ThreeSlippyMapGlobe extends Group {
 
   // Public attributes
   tileUrl;
-  thresholds = [...new Array(DEFAULT_NUM_LEVELS)].map((_, idx) => 8 / 2**idx); // in terms of radius units
-  curvatureResolution = 4; // in degrees, affects number of vertices in tiles
+  minLevel;
+  maxLevel;
+  thresholds = [...new Array(30)].map((_, idx) => 8 / 2**idx); // in terms of radius units
+  curvatureResolution = 5; // in degrees, affects number of vertices in tiles
   tileMargin = 0;
   get level() { return this.#level }
   set level(level) {
@@ -111,7 +116,7 @@ export default class ThreeSlippyMapGlobe extends Group {
 
     if (this.tileUrl) {
       const idx = this.thresholds.findIndex(t => t && t <= cameraDistance);
-      this.level = idx < 0 ? this.thresholds.length : idx;
+      this.level = Math.min(this.maxLevel, Math.max(this.minLevel, idx < 0 ? this.thresholds.length : idx));
       this.#fetchNeededTiles();
     }
   }

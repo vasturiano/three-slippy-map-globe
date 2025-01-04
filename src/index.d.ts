@@ -4,6 +4,8 @@ type TileUrlFn = (x: number, y: number, level: number) => string;
 
 export interface ConfigOptions {
   tileUrl?: TileUrlFn;
+  minLevel?: number;
+  maxLevel?: number;
   mercatorProjection?: boolean;
 }
 
@@ -12,6 +14,8 @@ declare class SlippyMapGlobe extends Object3D {
 
   // Attributes
   tileUrl?: TileUrlFn;
+  minLevel: number;
+  maxLevel: number;
   thresholds: number[];
   level: number;
   tileMargin: number;

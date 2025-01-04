@@ -20,8 +20,10 @@
 
     const R = 100;
 
-    const Globe = new SlippyMapGlobe(R);
-    Globe.tileUrl = (x, y, l) => `https://tile.opentopomap.org/${l}/${x}/${y}.png`;
+    const Globe = new SlippyMapGlobe(R, {
+      tileUrl: (x, y, l) => `https://tile.opentopomap.org/${l}/${x}/${y}.png`,
+      maxLevel: 17
+    });
 
     // Setup renderer
     const renderer = new THREE.WebGLRenderer();
