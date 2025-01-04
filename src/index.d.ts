@@ -23,6 +23,7 @@ declare class SlippyMapGlobe extends Object3D {
 
   // Methods
   updatePov(camera: Camera): void;
+  clearTiles(): void;
 }
 
 export default SlippyMapGlobe;

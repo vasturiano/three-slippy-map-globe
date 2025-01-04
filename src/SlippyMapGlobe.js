@@ -121,6 +121,19 @@ export default class ThreeSlippyMapGlobe extends Group {
     }
   }
 
+  clearTiles = () => {
+    Object.values(this.#tilesMeta).forEach(l => {
+      l.forEach(d => {
+        if (d.obj) {
+          this.remove(d.obj);
+          emptyObject(d.obj);
+          delete d.obj;
+        }
+      });
+    });
+    this.#tilesMeta = {};
+  }
+
   // Private methods
   #buildMetaLevel(level) {
     if (level > MAX_LEVEL_TO_BUILD_LOOKUP_OCTREE) {
@@ -191,7 +204,6 @@ export default class ThreeSlippyMapGlobe extends Group {
       }
     }
 
-    /*
     console.log({
       level: this.level,
       totalObjs: this.children.length,
@@ -201,7 +213,6 @@ export default class ThreeSlippyMapGlobe extends Group {
       fetched: this.#tilesMeta[this.level].filter(d => d.obj).length,
       loading: this.#tilesMeta[this.level].filter(d => d.loading).length,
     });
-    */
 
     tiles
       .filter(d => !d.obj)
