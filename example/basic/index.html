@@ -22,7 +22,6 @@
 
     const Globe = new SlippyMapGlobe(R);
     Globe.tileUrl = (x, y, l) => `https://tile.opentopomap.org/${l}/${x}/${y}.png`;
-    Globe.thresholds = [...new Array(17)].map((_, idx) => 8 / 2**idx);
 
     // Setup renderer
     const renderer = new THREE.WebGLRenderer();
