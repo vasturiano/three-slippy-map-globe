@@ -63,7 +63,14 @@ export default class ThreeSlippyMapGlobe extends Group {
 
     if (level === prevLevel || prevLevel === undefined) return; // nothing else to do
 
-    if (prevLevel > level) { // Remove upper layers
+    // Bring layer to front
+    this.#tilesMeta[level].forEach(d => d.obj && (d.obj.material.depthWrite = true));
+
+    // push lower layers to background
+    prevLevel < level && this.#tilesMeta[prevLevel].forEach(d => d.obj && (d.obj.material.depthWrite = false));
+
+    // Remove upper layers
+    if (prevLevel > level) {
       for (let l = level + 1; l <= prevLevel; l++) {
         this.#tilesMeta[l] && this.#tilesMeta[l].forEach(d => {
           if (d.obj) {
