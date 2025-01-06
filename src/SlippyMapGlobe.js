@@ -63,20 +63,17 @@ export default class ThreeSlippyMapGlobe extends Group {
 
     if (level === prevLevel || prevLevel === undefined) return; // nothing else to do
 
-    // Bring layer to front
-    this.#tilesMeta[level].forEach(d => d.obj && (d.obj.material.depthTest = true));
-
-    this.#tilesMeta[prevLevel].forEach(prevLevel < level ?
-      // push lower layers to background
-      d => d.obj && (d.obj.material.depthTest = false) :
-      // Remove upper layers
-      d => {
-        if (d.obj) {
-          this.remove(d.obj);
-          emptyObject(d.obj);
-          delete d.obj;
-        }
-      });
+    if (prevLevel > level) { // Remove upper layers
+      for (let l = level + 1; l <= prevLevel; l++) {
+        this.#tilesMeta[l] && this.#tilesMeta[l].forEach(d => {
+          if (d.obj) {
+            this.remove(d.obj);
+            emptyObject(d.obj);
+            delete d.obj;
+          }
+        });
+      }
+    }
 
     this.#fetchNeededTiles();
   }
@@ -190,20 +187,23 @@ export default class ThreeSlippyMapGlobe extends Group {
               return d;
             });
         } else { // gen only those missing, one by one
-          tiles = [];
+          const selTiles = [];
           for (let x = x0; x <= x1; x++) {
             for (let y = y0; y <= y1; y++) {
               const k = `${x}_${y}`;
               if (!r.hasOwnProperty(k)) {
                 r[k] = genTiles(this.level, this.#isMercator, x, y, x, y)[0];
+                tiles.push(r[k]);
               }
-              tiles.push(r[k]);
+              selTiles.push(r[k]);
             }
           }
+          tiles = selTiles;
         }
       }
     }
 
+    /*
     console.log({
       level: this.level,
       totalObjs: this.children.length,
@@ -213,6 +213,7 @@ export default class ThreeSlippyMapGlobe extends Group {
       fetched: this.#tilesMeta[this.level].filter(d => d.obj).length,
       loading: this.#tilesMeta[this.level].filter(d => d.loading).length,
     });
+    */
 
     tiles
       .filter(d => !d.obj)
