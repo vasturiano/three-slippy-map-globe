@@ -28,7 +28,7 @@ export default class ThreeSlippyMapGlobe extends Group {
   constructor(radius, {
     tileUrl,
     minLevel = 0,
-    maxLevel = 20,
+    maxLevel = 17,
     mercatorProjection = true
   } = {}) {
     super();

@@ -21,8 +21,7 @@
     const R = 100;
 
     const Globe = new SlippyMapGlobe(R, {
-      tileUrl: (x, y, l) => `https://tile.opentopomap.org/${l}/${x}/${y}.png`,
-      maxLevel: 17
+      tileUrl: (x, y, l) => `https://tile.openstreetmap.org/${l}/${x}/${y}.png`
     });
 
     // Setup renderer
@@ -39,7 +38,7 @@
     // Setup camera
     const camera = new THREE.PerspectiveCamera();
     camera.aspect = window.innerWidth/window.innerHeight;
-    camera.near = 1e-12;
+    camera.near = 1e-3;
     camera.far = R * 100;
     camera.updateProjectionMatrix();
     camera.position.z = R * 6;
