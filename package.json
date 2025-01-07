@@ -1,6 +1,6 @@
 {
   "name": "three-slippy-map-globe",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "description": "Tiled maps on a globe as a ThreeJS reusable 3D object",
   "type": "module",
   "unpkg": "dist/three-slippy-map-globe.min.js",
