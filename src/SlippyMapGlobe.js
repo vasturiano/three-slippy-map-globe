@@ -4,6 +4,7 @@ import {
   Group,
   Matrix4,
   Mesh,
+  MeshBasicMaterial,
   MeshLambertMaterial,
   SphereGeometry,
   SRGBColorSpace,
@@ -37,6 +38,16 @@ export default class ThreeSlippyMapGlobe extends Group {
     this.minLevel = minLevel;
     this.maxLevel = maxLevel;
     this.level = 0;
+
+    // Add protective black sphere just below surface to prevent any depth buffer anomalies
+    this.add(this.#innerBackLayer = new Mesh(
+      new SphereGeometry(this.#radius * 0.99, 180, 90),
+      new MeshBasicMaterial({ color: 0x0 })
+    ));
+    this.#innerBackLayer.visible = false;
+    this.#innerBackLayer.material.polygonOffset = true;
+    this.#innerBackLayer.material.polygonOffsetUnits = 3;
+    this.#innerBackLayer.material.polygonOffsetFactor = 1;
   }
 
   // Private attributes
@@ -46,6 +57,7 @@ export default class ThreeSlippyMapGlobe extends Group {
   #tilesMeta = {};
   #isInView;
   #camera;
+  #innerBackLayer;
 
   // Public attributes
   tileUrl;
@@ -62,6 +74,9 @@ export default class ThreeSlippyMapGlobe extends Group {
     this.#level = level;
 
     if (level === prevLevel || prevLevel === undefined) return; // nothing else to do
+
+    // Activate back layer for levels > 0, when there's !depthWrite tiles
+    this.#innerBackLayer.visible = level > 0;
 
     // Bring layer to front
     this.#tilesMeta[level].forEach(d => d.obj && (d.obj.material.depthWrite = true));
