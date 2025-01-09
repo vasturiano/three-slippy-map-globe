@@ -6,7 +6,7 @@ ThreeJS Slippy Map Tiled Globe
 [![NPM Downloads][npm-downloads-img]][npm-downloads-url]
 
 <p align="center">
-  <a href="//vasturiano.github.io/three-slippy-map-globe/example/basic/"><img width="90%" src="https://vasturiano.github.io/three-slippy-map-globe/preview4.gif"></a>
+  <a href="//vasturiano.github.io/three-slippy-map-globe/example/basic/"><img width="90%" src="https://vasturiano.github.io/three-slippy-map-globe/preview3.gif"></a>
 </p>
 
 A ThreeJS mesh to render tiled raster images onto a sphere using [slippy map](https://en.wikipedia.org/wiki/Tiled_web_map) mechanics, with automatic detection of zoom level and tiles in view based on camera aim and proximity.
