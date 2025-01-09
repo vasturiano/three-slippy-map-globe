@@ -1,9 +1,13 @@
 ThreeJS Slippy Map Tiled Globe
 ==============================
 
+<img src="https://vasturiano.github.io/three-slippy-map-globe/preview.gif">
+
 [![NPM package][npm-img]][npm-url]
 [![Build Size][build-size-img]][build-size-url]
 [![NPM Downloads][npm-downloads-img]][npm-downloads-url]
+
+![Example](https://vasturiano.github.io/three-slippy-map-globe/preview.gif)
 
 <p align="center">
   <a href="//vasturiano.github.io/three-slippy-map-globe/example/basic/"><img src="https://vasturiano.github.io/three-slippy-map-globe/preview.gif"></a>
@@ -61,7 +65,7 @@ new SlippyMapGlobe(globeRadius: float, { configOptions })
 | <b>minZoom</b>: <i>int</i>         | The minimum zoom level of the tiles.                                                                                                                                                                                                                   |              `0`               |
 | <b>maxZoom</b>: <i>int</i>         | The maximum zoom level of the tiles.                                                                                                                                                                                                                   |              `17`              |
 | <b>thresholds</b>: <i>float[]</i>  | The list of zoom level shifting thresholds, based on camera proximity to the surface, specified in globe radius units.                                                                                                                                 | `[8, 4, 2, 1, 0.5, 0.25, ...]` |
-| <b>level</b>: <i>int</i>           | The current zoom level the map is in. Can be used to manually shift zoom levels.                                                                                                                                                                       |              `0`               |
+| <b>level</b>: <i>int</i>           | The current zoom level the map is in. Can be modified to manually shift zoom levels.                                                                                                                                                                   |              `0`               |
 
 ### Methods
 
