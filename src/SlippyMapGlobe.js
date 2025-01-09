@@ -53,6 +53,7 @@ export default class ThreeSlippyMapGlobe extends Group {
   // Private attributes
   #radius;
   #isMercator;
+  #tileUrl;
   #level;
   #tilesMeta = {};
   #isInView;
@@ -60,7 +61,11 @@ export default class ThreeSlippyMapGlobe extends Group {
   #innerBackLayer;
 
   // Public attributes
-  tileUrl;
+  get tileUrl() { return this.#tileUrl }
+  set tileUrl(tileUrl) {
+    this.#tileUrl = tileUrl;
+    this.#fetchNeededTiles();
+  }
   minLevel;
   maxLevel;
   thresholds = [...new Array(30)].map((_, idx) => 8 / 2**idx); // in terms of radius units
