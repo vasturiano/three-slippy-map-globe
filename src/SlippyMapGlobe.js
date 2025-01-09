@@ -64,7 +64,7 @@ export default class ThreeSlippyMapGlobe extends Group {
   get tileUrl() { return this.#tileUrl }
   set tileUrl(tileUrl) {
     this.#tileUrl = tileUrl;
-    this.#fetchNeededTiles();
+    this.updatePov(this.#camera); // update current view
   }
   minLevel;
   maxLevel;
@@ -107,19 +107,11 @@ export default class ThreeSlippyMapGlobe extends Group {
 
   // Public methods
   updatePov(camera) {
-    if (!this.tileUrl || !camera || !(camera instanceof Camera)) return;
+    if (!camera || !(camera instanceof Camera)) return;
 
     this.#camera = camera;
 
-    const pov = camera.position.clone();
-    const distToGlobeCenter = pov.distanceTo(this.getWorldPosition(new Vector3()));
-    const cameraDistance = (distToGlobeCenter - this.#radius) / this.#radius; // in units of globe radius
-
-    camera.updateMatrix();
-    camera.updateMatrixWorld();
-    const frustum = new Frustum();
-    frustum.setFromProjectionMatrix(new Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
-
+    let frustum;
     this.#isInView = d => {
       if (!d.hullPnts) { // cached for next time to improve performance
         const lngLen = 360 / (2**this.level);
@@ -133,12 +125,23 @@ export default class ThreeSlippyMapGlobe extends Group {
           .map(({ x, y, z }) => new Vector3(x, y, z));
       }
 
+      if (!frustum) {
+        frustum = new Frustum();
+        camera.updateMatrix();
+        camera.updateMatrixWorld();
+        frustum.setFromProjectionMatrix(new Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+      }
+
       return d.hullPnts.some(pos =>
         frustum.containsPoint(pos.clone().applyMatrix4(this.matrixWorld))
       );
     }
 
     if (this.tileUrl) {
+      const pov = camera.position.clone();
+      const distToGlobeCenter = pov.distanceTo(this.getWorldPosition(new Vector3()));
+      const cameraDistance = (distToGlobeCenter - this.#radius) / this.#radius; // in units of globe radius
+
       const idx = this.thresholds.findIndex(t => t && t <= cameraDistance);
       this.level = Math.min(this.maxLevel, Math.max(this.minLevel, idx < 0 ? this.thresholds.length : idx));
       this.#fetchNeededTiles();
