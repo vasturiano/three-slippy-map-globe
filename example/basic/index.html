@@ -3,7 +3,7 @@
 
   <script type="importmap">{ "imports": {
     "three": "https://esm.sh/three",
-    "three/addons/": "https://esm.sh/three/examples/jsm/"
+    "three/": "https://esm.sh/three/"
   }}</script>
 
 <!--  <script type="module"> import * as THREE from 'three'; window.THREE = THREE;</script>-->
@@ -16,7 +16,7 @@
   <script type="module">
     import SlippyMapGlobe from 'https://esm.sh/three-slippy-map-globe?external=three';
     import * as THREE from 'https://esm.sh/three';
-    import { OrbitControls } from 'three/addons/controls/OrbitControls.js?external=three';
+    import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js?external=three';
 
     const R = 100;
 
@@ -27,6 +27,7 @@
     // Setup renderer
     const renderer = new THREE.WebGLRenderer();
     renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
     document.getElementById('globe').appendChild(renderer.domElement);
 
     // Setup scene
